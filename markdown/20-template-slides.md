@@ -23,7 +23,7 @@
 > [suse.com](https://www.suse.com/)
 
 
-<!-- .slide: data-state="normal" id="what-is-race" data-timing="20s" data-menu-title="What is a data race?" -->
+<!-- .slide: data-state="normal" id="what-is-race" data-timing="20s" data-menu-title="What is Sparse?" -->
 # What is Sparse
 
 - A C static analysis library
@@ -33,7 +33,7 @@
 - Possibly other stuff Richard doesn't know about
 
 
-<!-- .slide: data-state="normal" id="what-is-kernel-race" data-timing="20s" data-menu-title="What else is Sparse used for" -->
+<!-- .slide: data-state="normal" id="what-is-kernel-race" data-timing="20s" data-menu-title="What is Sparse used for" -->
 # What is Sparse used for?
 
 Other than what I am talking about today...
@@ -61,7 +61,7 @@ The Linux Test Project is...
 *SUSE is the top contributor in recent years*
 
 
-<!-- .slide: data-state="normal" id="simple-race-1" data-timing="20s" data-menu-title="A simple race" -->
+<!-- .slide: data-state="normal" id="simple-race-1" data-timing="20s" data-menu-title="What does LTP currently use it for" -->
 # What does LTP currently use it for?
 
 - Checking `TST_RET` and `TST_ERR` variables are not overwritten by
@@ -71,8 +71,8 @@ The Linux Test Project is...
 - Checking `tst_tag` arrays are statically initialized with the sentinel value `{ }`
 
 
-<!-- .slide: data-state="normal" id="simple-race-1" data-timing="20s" data-menu-title="A simple race" -->
-# Why does LTP use it
+<!-- .slide: data-state="normal" id="simple-race-1" data-timing="20s" data-menu-title="Why does LTP use it??" -->
+# Why does LTP use it?
 
 - We can only rely on contributors having (an old version of) GCC
 - We are *very* motivated to reduce our review workload
@@ -85,7 +85,7 @@ The Linux Test Project is...
 For more see: https://richiejp.com/custom-c-static-analysis-tools
 
 
-<!-- .slide: data-state="normal" id="simple-race-2" data-timing="20s" data-menu-title="A simple diagram" -->
+<!-- .slide: data-state="normal" id="simple-race-2" data-timing="20s" data-menu-title="How does Sparse work?" -->
 # How does Sparse work?
 
 - Hand written lexer creates a token list
@@ -104,7 +104,7 @@ For more see: https://richiejp.com/custom-c-static-analysis-tools
 It continues...
 
 
-<!-- .slide: data-state="normal" id="simple-race-3" data-timing="20s" data-menu-title="Simple plots" -->
+<!-- .slide: data-state="normal" id="simple-race-3" data-timing="20s" data-menu-title="How does Sparse work? cont." -->
 # How does Sparse work? cont.
 
 - Something involving a dominance tree to help analyze control flow
@@ -114,7 +114,7 @@ Eventually we get a simplified graph of basicblocks! Similar to LLVM
 IR (intermediate representation).
 
 
-<!-- .slide: data-state="normal" id="sendmsg03-1" data-timing="20s" data-menu-title="sendmsg03 1" -->
+<!-- .slide: data-state="normal" id="sendmsg03-1" data-timing="20s" data-menu-title="How does LTP use Sparse??" -->
 # How do we use this to perform the LTP checks?
 
 - We operate on two levels
@@ -128,7 +128,7 @@ IR (intermediate representation).
 - We use the symbols to check the `tst_tag` array is terminated with `{ }`
 
 
-<!-- .slide: data-state="normal" id="sendmsg03-2" data-timing="20s" data-menu-title="sendmsg03 2" -->
+<!-- .slide: data-state="normal" id="sendmsg03-2" data-timing="20s" data-menu-title="The TST_RET and TST_ERR check" -->
 # The `TST_RET` and `TST_ERR` check
 
 - Helper macros like `TEST` and the `TST_EXP_*` write to these globals
@@ -153,7 +153,7 @@ int tst_alg_create(void)
 ```
 
 
-<!-- .slide: data-state="normal" id="sendmsg03-2" data-timing="20s" data-menu-title="sendmsg03 2" -->
+<!-- .slide: data-state="normal" id="sendmsg03-2" data-timing="20s" data-menu-title="The TST_RET and TST_ERR implementation" -->
 The `TST_RET` and `TST_ERR` implementation. Short and "simple"
 
 ```c
@@ -180,7 +180,7 @@ static void check_lib_sets_TEST_vars(const struct instruction *insn)
 Note that we check every instruction in library objects
 
 
-<!-- .slide: data-state="normal" id="sendmsg03-3" data-timing="20s" data-menu-title="sendmsg03 3" -->
+<!-- .slide: data-state="normal" id="sendmsg03-3" data-timing="20s" data-menu-title="The symbol visibility check" -->
 # The symbol visibility check
 
 * Make sure symbols that can be static are static
@@ -202,8 +202,8 @@ static struct tst_test test = {
 ```
 
 
-<!-- .slide: data-state="normal" id="sendmsg03-3" data-timing="20s" data-menu-title="sendmsg03 3" -->
-The symbol visibility (static) check. Too long to fit on a slide, but...
+<!-- .slide: data-state="normal" id="sendmsg03-3" data-timing="20s" data-menu-title="The symbol visibility implementation" -->
+The symbol visibility (static) implementation. Too long to fit on a slide, but...
 
 ```c
 static void check_symbol_visibility(const struct symbol *const sym)
@@ -248,7 +248,7 @@ static void check_symbol_visibility(const struct symbol *const sym)
 ```
 
 
-<!-- .slide: data-state="normal" id="sendmsg03-3" data-timing="20s" data-menu-title="sendmsg03 3" -->
+<!-- .slide: data-state="normal" id="sendmsg03-3" data-timing="20s" data-menu-title="The tst_tag null terminator check" -->
 # The `tst_tag` null terminator check
 
 * Tests can be tagged with info such as kernel Git commit and CVE number
@@ -272,7 +272,7 @@ static struct tst_test test = {
 ```
 
 
-<!-- .slide: data-state="normal" id="sendmsg03-4" data-timing="20s" data-menu-title="sendmsg03 4" -->
+<!-- .slide: data-state="normal" id="sendmsg03-4" data-timing="20s" data-menu-title="The tst_tag null terminator implementation" -->
 The `tst_tag` null terminator implementation. Not a huge amount of code, but...
 
 ```c
@@ -339,7 +339,7 @@ static void check_test_struct(const struct symbol *const sym)
 ```
 
 
-<!-- .slide: data-state="normal" id="sendmsg03-4" data-timing="20s" data-menu-title="sendmsg03 4" -->
+<!-- .slide: data-state="normal" id="sendmsg03-4" data-timing="20s" data-menu-title="Final thoughts & Questions" -->
 # Final thoughts & Questions
 
 * Writing checks against the basicblocks IR is wonderful
