@@ -7,81 +7,57 @@
 <div class="date-location">FOSDEM 2022</div>
 
 
+<!-- .slide: data-state="normal toc" id="contact" data-timing="20s" data-menu-title="Contact" -->
+#  Contact
+
+1. Richard Palethorpe
+> [richiejp.com](https://richiejp.com) / rpalethorpe@suse.com
+
+2. Linux Test Project
+> [github.com/linux-test-project](https://github.com/linux-test-project)
+
+3. Sparse Project
+> linux-sparse@vger.kernel.org
+
+4. SUSE Linux
+> [suse.com](https://www.suse.com/)
+
+
 <!-- .slide: data-state="normal" id="what-is-race" data-timing="20s" data-menu-title="What is a data race?" -->
-## What is a data race?
+# What is Sparse
 
-<div class="breadcrumbs">Data race</div>
-
-Informally and according to Richard Palethorpe.
-
-* It is also called a race condition.
-
-* It requires a computation which reads at least one variable from
-  somewhere.
-
-* The result(s) of the computation must change depending on the value
-  of the variable.
-
-* The value of the variable must change over time. Thus the result of
-  the computation changes over time.
-
-* Only static, purely functional code has no data races.
-
-### However...
-
-Usually if someone talks about a "data race" or "race condition" they
-are talking about a bug caused by a data race.
+- A C static analysis library
+- A Linux kernel static analysis tool
+- A "simple" C compiler written in C
+- Yet another Linus Torvalds project
+- Possibly other stuff Richard doesn't know about
 
 
-<!-- .slide: data-state="normal" id="what-is-kernel-race" data-timing="20s" data-menu-title="Typical kernel races" -->
-## What do kernel data races typically look like?
+<!-- .slide: data-state="normal" id="what-is-kernel-race" data-timing="20s" data-menu-title="What else is Sparse used for" -->
+# What is Sparse used for?
 
-<div class="breadcrumbs">Kernel race</div>
+Other than what I am talking about today...
 
-A gross and degenerate simplification.
-
-* A block of code updates a memory pointer (Block A).
-
-* Another block reads a memory pointer (Block B).
-
-* The blocks may run concurrently.
-
-* Block A should only run after/before B to ensure the pointer value
-  is valid for B.
-
-* The ordering of memory accesses has not been ensured in all
-  scenarios.
-
-* Block B blows up when it dereferences a dodgy pointer.
-
-### However...
-
-* It is usually more complicated than that.
-* A whole bunch of conditions have to be met for the value A writes to
-  blow up B.
+- Implementing C attributes useful for the kernel, e.g.
+  + Pointer namespaces: `__attribute__((address_space(name)))`
+  + Matching entry and exit contexts (usually whether locks are held/released)
+	`__attribute__((context(name, entry, exit)))`
+- Implementing checks useful for the kernel
+- Implementing general checks quickly
+- As a research compiler?
 
 
-<!-- .slide: data-state="normal" id="what-is-reproducer" data-timing="20s" data-menu-title="What is a reproducer?" -->
-## What is a reproducer?
+<!-- .slide: data-state="normal" id="what-is-reproducer" data-timing="20s" data-menu-title="What is the LTP?" -->
+# What is the LTP?
 
-<div class="breadcrumbs">Reproducers</div>
+The Linux Test Project is...
 
-And what is Fuzzy Sync for?
+- A collection of kernel feature tests
+- A collection of kernel bug reproducers
+- A framework for writing tests in C and Shell
+- A home for orphaned projects such as the Open POSIX compliance tests
 
-* A reproducer is a program which triggers a particular bug in another
-  program.
-
-* When a bug is fixed in the kernel, we can write an LTP test which
-  reproduces it.
-  * This validates the bug fix.
-  * Ensures the bug is not reintroduced.
-  * Ensures the fix is backported to older kernels.
-  * Accidentally finds other bugs.
-
-* A particular data race outcome may be difficult to reproduce.
-
-* Fuzzy Sync helps reproduce bugs which require a particular race
-  outcome.
+*SUSE is the top contributor in recent years and uses it to detect issues early.*
 
 
 <!-- .slide: data-state="normal" id="simple-race-1" data-timing="20s" data-menu-title="A simple race" -->
