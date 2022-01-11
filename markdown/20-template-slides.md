@@ -61,461 +61,289 @@ The Linux Test Project is...
 
 
 <!-- .slide: data-state="normal" id="simple-race-1" data-timing="20s" data-menu-title="A simple race" -->
-## A simple race to get us started
+# What does LTP currently use it for?
 
-<div class="breadcrumbs">SIMPLE RACE</div>
+- Checking `TST_RET` and `TST_ERR` variables are not overwritten by
+  the test library
+- Checking `tst_` is prefixed to public test library functions
+- Checking the static keyword is used
+- Checking `tst_tag` arrays are statically initialized with the sentinel value `{ }`
 
-```c
-// Thread A
 
-while (fzsync_run_a(&pair)) {
-	winner = 'A';
+<!-- .slide: data-state="normal" id="simple-race-1" data-timing="20s" data-menu-title="A simple race" -->
+# Why does LTP use it
 
-	fzsync_start_race_a(&pair);
-	if (winner == 'A' && winner == 'B')
-		winner = 'A';
-	fzsync_end_race_a(&pair);
-}
-```
+- We can only rely on contributors having (an old version of) GCC
+- We are *very* motivated to reduce our review workload
+- Sparse is easy to vendor in to LTP and ~force~ encourage contributors to use it
+  + Written in C with only GCC and stdlib as dependencies
+  + Compiles and runs wherever Linux does
+  + Used by Linux itself
+- Powerful enough to solve any issue we have tried
 
-<!-- .element class="column" -->
-
-```c
-// Thread B
-
-while (fzsync_run_b(&pair)) {
-	
-	
-	fzsync_start_race_b(&pair);
-	nanosleep(/* for 1ns */);
-	winner = 'B';
-	fzsync_end_race_b(&pair);
-}
-```
-
-<!-- .element class="column" -->
-* How can `winner` be equal to 'A' and 'B'?
-* Will `winner` ever be equal to 'A' when `...end_race_a` and
-  `...end_race_b` are synchronised?
+For more see: https://richiejp.com/custom-c-static-analysis-tools
 
 
 <!-- .slide: data-state="normal" id="simple-race-2" data-timing="20s" data-menu-title="A simple diagram" -->
-<div class="breadcrumbs">SIMPLE RACE</div>
+# How does Sparse work?
 
-![Diagram](images/race-time-diagrams.svg)
+- Hand written lexer creates a token list
+- Tokens are parsed into "symbols"
+  + These initially resemble an AST (abstract syntax tree) or DAG
+    (directed acyclic graph).
+- Preprocessing is done and macro symbols are expanded
+- Some symbols are expanded or reduced (e.g static algebraic
+  expressions are simplified)
+- The symbols are "linearized" into "basicblocks" IR:
+  + basicblocks are *linear* sequences of instructions;
+	Like simplified assembly with no jumps or loops
+  + basicblocks are chained together into a graph (by jumps)
+- The basicblocks are converted into SSA (single static assigment) form
+
+It continues...
 
 
 <!-- .slide: data-state="normal" id="simple-race-3" data-timing="20s" data-menu-title="Simple plots" -->
-<div class="breadcrumbs">SIMPLE RACE</div>
+# How does Sparse work? cont.
 
-## Timing Plots
+- Something involving a dominance tree to help analyze control flow
+- Magic?
 
-![Start](images/start_difference.png)
-<!-- .element class="column" -->
-
-![End](images/end_difference.png)
-<!-- .element class="column" -->
-
-* `winner == 'A'` only once (red circle), when `A` is delayed by roughly 55000ns.
-* More about this at [richiejp.com/a-rare-data-race](https://richiejp.com/a-rare-data-race).
+Eventually we get a simplified graph of basicblocks! Similar to LLVM
+IR (intermediate representation).
 
 
 <!-- .slide: data-state="normal" id="sendmsg03-1" data-timing="20s" data-menu-title="sendmsg03 1" -->
-<div class="breadcrumbs">SENDMSG03</div>
+# How do we use this to perform the LTP checks?
 
-## [sendmsg03](https://github.com/linux-test-project/ltp/blob/master/testcases/kernel/syscalls/sendmsg/sendmsg03.c) and LTP test anatomy
+- We operate on two levels
+  + The AST/DAG (symbols)
+  + The linearized IR (basicblocks and instructions)
+- We use the linearized form to find store instructions with `TST_RET`
+  or `TST_ERR` as the destination
+- We inspect the symbols representing function and variable
+  defintions to see if they should be static or have the `tst_`
+  prefix
+- We use the symbols to check the `tst_tag` array is terminated with `{ }`
+
+
+<!-- .slide: data-state="normal" id="sendmsg03-2" data-timing="20s" data-menu-title="sendmsg03 2" -->
+# The `TST_RET` and `TST_ERR` check
+
+- Helper macros like `TEST` and the `TST_EXP_*` write to these globals
+- Only test code should write to these to avoid silently overwriting
+  an error value
+- Various library functions were using the `TEST` macro or modifying
+  the vars directly
+
+E.g.
 
 ```c
-// SPDX-License-Identifier: GPL-2.0-or-later
-...
-#include "tst_test.h"
-#include "tst_fuzzy_sync.h"
-...
-static struct tst_fzsync_pair fzsync_pair;
-
-static void setup(void)
+int tst_alg_create(void)
 {
-	...
-	fzsync_pair.exec_loops = 100000;
-	tst_fzsync_pair_init(&fzsync_pair);
+	TEST(socket(AF_ALG, SOCK_SEQPACKET, 0));
+	if (TST_RET >= 0)
+		return TST_RET;
+	if (TST_ERR == EAFNOSUPPORT)
+		tst_brk(TCONF, "kernel doesn't support AF_ALG");
+	tst_brk(TBROK | TTERRNO, "unexpected error creating AF_ALG socket");
+	return -1;
 }
+```
 
-static void cleanup(void)
+
+<!-- .slide: data-state="normal" id="sendmsg03-2" data-timing="20s" data-menu-title="sendmsg03 2" -->
+The `TST_RET` and `TST_ERR` implementation. Short and "simple"
+
+```c
+static void check_lib_sets_TEST_vars(const struct instruction *insn)
 {
-	...
-	tst_fzsync_pair_cleanup(&fzsync_pair);
-}
+	static struct ident *TST_RES_id, *TST_ERR_id;
 
-static void *thread_run(void *arg)
-{
-	int val = 0;
-
-	while (tst_fzsync_run_b(&fzsync_pair)) {
-		tst_fzsync_start_race_b(&fzsync_pair);
-		setsockopt(sockfd, SOL_IP, IP_HDRINCL, &val, sizeof(val));
-		tst_fzsync_end_race_b(&fzsync_pair);
+	if (!TST_RES_id) {
+		TST_RES_id = built_in_ident("TST_RET");
+		TST_ERR_id = built_in_ident("TST_ERR");
 	}
 
-	return arg;
+	if (insn->opcode != OP_STORE)
+		return;
+	if (insn->src->ident != TST_RES_id &&
+	    insn->src->ident != TST_ERR_id)
+		return;
+
+	warning(insn->pos,
+		"LTP-002: Library should not write to TST_RET or TST_ERR");
 }
+```
 
-static void run(void)
-{
-	...
-	tst_fzsync_pair_reset(&fzsync_pair, thread_run);
-	while (tst_fzsync_run_a(&fzsync_pair)) {
-		...
-		tst_fzsync_start_race_a(&fzsync_pair);
-		sendmsg(sockfd, &msg, 0);
-		tst_fzsync_end_race_a(&fzsync_pair);
+Note that we check every instruction in library objects
 
-		if (tst_taint_check()) {
-			tst_res(TFAIL, "Kernel is vulnerable");
-			return;
-		}
-	}
 
-	tst_res(TPASS, "Nothing bad happened, probably");
-}
+<!-- .slide: data-state="normal" id="sendmsg03-3" data-timing="20s" data-menu-title="sendmsg03 3" -->
+# The symbol visibility check
+
+* Make sure symbols that can be static are static
+* Make sure LTP API symbols start with `tst_` or similar
+* Standard practice in C to avoid link time issues, but easy to forget
+* Allows exotic compilation: linking multiple tests into a single object
+
+e.g. Test author forgot to make some test callbacks static
+
+```c
+static void run(void) { ... } /* correct */
+void setup(void) { ... } /* wrong */
 
 static struct tst_test test = {
 	.test_all = run,
 	.setup = setup,
-	.cleanup = cleanup,
-	.taint_check = TST_TAINT_W | TST_TAINT_D,
-	.tags = (const struct tst_tag[]) {
-		{"linux-git", "8f659a03a0ba"},
-		{"CVE", "2017-17712"},
-		{}
+	...
+}
+```
+
+
+<!-- .slide: data-state="normal" id="sendmsg03-3" data-timing="20s" data-menu-title="sendmsg03 3" -->
+The symbol visibility (static) check. Too long to fit on a slide, but...
+
+```c
+static void check_symbol_visibility(const struct symbol *const sym)
+{
+	const unsigned long mod = sym->ctype.modifiers;
+	const char *const name = show_ident(sym->ident);
+	const int has_lib_prefix = !strncmp("tst_", name, 4) ||
+		!strncmp("TST_", name, 4) ||
+		!strncmp("ltp_", name, 4) ||
+		!strncmp("safe_", name, 5);
+
+	if (!(mod & MOD_TOPLEVEL))
+		return;
+
+	if (has_lib_prefix && (mod & MOD_STATIC) && !(mod & MOD_INLINE)) {
+		warning(sym->pos,
+			"LTP-003: Symbol '%s' has the LTP public library prefix, but is static (private).",
+			name);
+		return;
+	}
+
+	if ((mod & MOD_STATIC))
+		return;
+
+	if (tu_kind == LTP_LIB && !has_lib_prefix) {
+		warning(sym->pos,
+			"LTP-003: Symbol '%s' is a public library function, but is missing the 'tst_' prefix",
+			name);
+		return;
+	}
+
+	if (sym->same_symbol)
+		return;
+
+	if (sym->ident == &main_ident)
+		return;
+
+	warning(sym->pos,
+		"Symbol '%s' has no prototype or library ('tst_') prefix. Should it be static?",
+		name);
+}
+```
+
+
+<!-- .slide: data-state="normal" id="sendmsg03-3" data-timing="20s" data-menu-title="sendmsg03 3" -->
+# The `tst_tag` null terminator check
+
+* Tests can be tagged with info such as kernel Git commit and CVE number
+* These are stored in the `test.tags` array which is *only* accessed
+  when the test *fails*
+* It is an `{}` (empty struct) terminated array. The library segfaults without it
+* Tags are often appended to tests after the initial commit and not
+  tested on a buggy kernel
+
+e.g. Test author forgot to add `{}` at the end
+
+```c
+static struct tst_test test = {
+	...
+	.tags = (const struct tst_tag[]){
+		{"linux-git", "ce683e5f9d04"},
+		{"CVE", "CVE-2016-4997"},
+		/* Should be {} here */
 	}
 };
 ```
 
-* The LTP library implements `main` and many features
-* We declare `struct tst_test test` and implement the test specific logic
-* Has some similarities to popular testing frameworks
 
-
-<!-- .slide: data-state="normal" id="sendmsg03-2" data-timing="20s" data-menu-title="sendmsg03 2" -->
-<div class="breadcrumbs">SENDMSG03</div>
+<!-- .slide: data-state="normal" id="sendmsg03-4" data-timing="20s" data-menu-title="sendmsg03 4" -->
+The `tst_tag` null terminator implementation. Not a huge amount of code, but...
 
 ```c
-// Thread A
-int val = 1;
-...
-while (tst_fzsync_run_a(&fzsync_pair)) {
-	SAFE_SETSOCKOPT_INT(sockfd, SOL_IP, 
-		                IP_HDRINCL, val);
-	tst_fzsync_start_race_a(&fzsync_pair);
-	sendmsg(sockfd, &msg, 0);
-	
-	tst_fzsync_end_race_a(&fzsync_pair);
-	...
-}
-```
-<!-- .element class="column" -->
-
-```c
-// Thread B
-int val = 0;
-
-while (tst_fzsync_run_b(&fzsync_pair)) {
-
-	                                                                   //
-	tst_fzsync_start_race_b(&fzsync_pair);
-	setsockopt(sockfd, SOL_IP, IP_HDRINCL, 
-		       &val, sizeof(val));
-	tst_fzsync_end_race_b(&fzsync_pair);
-
-}
-```
-<!-- .element class="column" -->
-
-* `sendmsg` and `setsockopt` are *system calls* which act on a *socket*
-* They are both acting on the same socket (`sockfd`)
-* It is clear just from the `fzsync` calls that the test is racing
-  `sendmsg` against `setsockopt`.
-* For some reason setting `IP_HDRINCL` to zero at the same time as
-  sending a message is bad
-
-
-<!-- .slide: data-state="normal" id="sendmsg03-3" data-timing="20s" data-menu-title="sendmsg03 3" -->
-<div class="breadcrumbs">SENDMSG03</div>
-
-```c
-// Thread A (net/ipv4/raw.c)
-static int raw_sendmsg(..) {
-	...
-	if (!inet->hdrincl) { //Branch 1
-		rfv.iov = msg->msg_iov;
-		rfv.hlen = 0;
-		err = raw_probe_proto_opt(&rfv, &fl4);
-		...
-	
-	if (!inet->hdrincl) { //Branch 2
-		...
-		err = ip_append_data(..., &rfv, ...);
-```
-<!-- .element class="column" -->
-
-```c
-// Thread B (net/ipv4/ip_sockglue.c)
-static int do_ip_setsockopt(...)
+static bool is_terminated_with_null_struct(const struct symbol *const sym)
 {
-	...
-	case IP_HDRINCL:
-		if (sk->sk_type != SOCK_RAW) {
-			err = -ENOPROTOOPT;
-			break;
-		}
-		inet->hdrincl = val ? 1 : 0;
-		break;
-	...
-```
-<!-- .element class="column" -->
+	const struct expression *const arr_init = sym->initializer;
+	const struct expression *item_init =
+		last_ptr_list((struct ptr_list *)arr_init->expr_list);
 
-* `do_ip_setsocket` can set `inet->hdrincl` while `raw_sendmsg` executes.
-* We start with `hdrincl = 1`
-* It is possible to set `hdrincl = 0` after branch 1, but before branch 2.
-* `rfv` will contain uninitialised stack data if branch 1 is not taken.
-* There could be other bugs as `inet->hdrincl` is accessed multiple times.
+	if (item_init->type == EXPR_POS)
+		item_init = item_init->init_expr;
 
-
-<!-- .slide: data-state="normal" id="sendmsg03-4" data-timing="20s" data-menu-title="sendmsg03 4" -->
-<div class="breadcrumbs">SENDMSG03</div>
-
-```sh
-st_test.c:1261: TINFO: Timeout per run is 0h 05m 00s
-[   33.972676] raw_sendmsg: sendmsg03 forgot to set AF_INET. Fix it!
-... TINFO: Minimum sampling period ended
-... TINFO: loop = 1024, delay_bias = 0
-... TINFO: start_a - start_b: { avg =   104ns, avg_dev =    32ns, dev_ratio = 0.31 }
-... TINFO: end_a - start_a  : { avg = 96269ns, avg_dev = 12595ns, dev_ratio = 0.13 }
-... TINFO: end_b - start_b  : { avg =  3750ns, avg_dev =   645ns, dev_ratio = 0.17 }
-... TINFO: end_a - end_b    : { avg = 92623ns, avg_dev = 12214ns, dev_ratio = 0.13 }
-... TINFO: spins            : { avg = 51068  , avg_dev =  7169  , dev_ratio = 0.14 }
-... TINFO: Reached deviation ratios < 0.10, introducing randomness
-... TINFO: Delay range is [-1839, 48895]
-... TINFO: loop = 8354, delay_bias = 0
-... TINFO: start_a - start_b: { avg =   109ns, avg_dev =     8ns, dev_ratio = 0.08 }
-... TINFO: end_a - start_a  : { avg = 85945ns, avg_dev =  6629ns, dev_ratio = 0.08 }
-... TINFO: end_b - start_b  : { avg =  3234ns, avg_dev =    91ns, dev_ratio = 0.03 }
-... TINFO: end_a - end_b    : { avg = 82821ns, avg_dev =  6539ns, dev_ratio = 0.08 }
-... TINFO: spins            : { avg = 47118  , avg_dev =  4193  , dev_ratio = 0.09 }
-[   37.924253] general protection fault, probably for non-canonical address 0xdffffc0000000002: 0000 [#1] SMP DEBUG_PAGEALLOC KASAN PTI
-[   37.925000] KASAN: null-ptr-deref in range [0x0000000000000010-0x0000000000000017]
-[   37.925411] CPU: 2 PID: 251 Comm: sendmsg03 Not tainted 5.10.4-22-default+ #137
-[   37.925946] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a-rebuilt.opensuse.org 04/01/2014
-[   37.926555] RIP: 0010:csum_and_copy_from_iter_full+0x2b/0xbc0
-...
-[   37.931155] Call Trace:
-[   37.931292]  ip_generic_getfrag+0x107/0x1a0
-[   37.932072]  __ip_append_data+0x1350/0x35c0
-[   37.933452]  ip_append_data+0xca/0x170
-[   37.933647]  raw_sendmsg+0x884/0x1180
-[   37.935890]  sock_sendmsg+0xdd/0x110
-[   37.936058]  ____sys_sendmsg+0x5a1/0x7b0
-[   37.936905]  ___sys_sendmsg+0xd8/0x160
-[   37.938414]  __sys_sendmsg+0xb7/0x140
-[   37.939583]  do_syscall_64+0x33/0x40
-[   37.939791]  entry_SYSCALL_64_after_hwframe+0x44/0xa9
-[   37.940005] RIP: 0033:0x7f5f94fdbebd
-...
-Test timeouted, sending SIGKILL!
-tst_test.c:1299: TFAIL: Kernel is now tainted.
-
-HINT: You _MAY_ be missing kernel fixes, see:
-
-https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=8f659a03a0ba
-
-HINT: You _MAY_ be vulnerable to CVE(s), see:
-
-https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-17712
-...
-```
-
-* Fuzzy Sync loops 8354 times until timing volatility reaches a lower threshold.
-* It appears `sendmsg` takes far longer to execute than `setsocketopt`.
-* Fuzzy Sync calculates a delay range which will overlap the syscalls in all possible ways.
-* Shortly after we start adding random delays we quickly hit a KASAN splat.
-* Stale stack data is passed to `ip_append_data` and eventually blows
-  up `csum_and_copy_from_iter_full` which tries to dereference part of
-  it.
-
-
-<!-- .slide: data-state="normal" id="sendmsg03-4" data-timing="20s" data-menu-title="sendmsg03 4" -->
-<div class="breadcrumbs">SENDMSG03</div>
-
-## sendmsg03 Wrap Up
-
-* Most likely the initial timings are recorded with `hdrincl = 0` for
-  all of `raw_sendmsg` because `setsockopt` is much faster. However
-  this still results in a good delay range.
-* Kernel bug assigned CVE-2017-17712
-* Found, fixed and original POC by Mohamed Ghannam
-  https://seclists.org/oss-sec/2017/q4/401
-* Reproducer converted to LTP Fuzzy Sync by Martin Doucha
-
-
-<!-- .slide: data-state="normal" id="af_alg07-1" data-timing="20s" data-menu-title="af_alg07 1" -->
-<div class="breadcrumbs">AF_ALG07</div>
-
-## [af_alg07](https://github.com/linux-test-project/ltp/blob/master/testcases/kernel/crypto/af_alg07.c) (CVE-2019-8912)
-
-```c
-// Thread A
-while (tst_fzsync_run_a(&fzsync_pair)) {
-	sock = tst_alg_setup_reqfd(...);
-	tst_fzsync_start_race_a(&fzsync_pair);
-	TEST(fchownat(sock, /*this user*/));
-	tst_fzsync_end_race_a(&fzsync_pair);
-	...
-	if (TST_RET == -1 && TST_ERR == ENOENT) {
-		tst_res(TPASS | TTERRNO, ...
-```
-<!-- .element class="column" -->
-
-```c
-// Thread B
-while (tst_fzsync_run_b(&fzsync_pair)) {
-
-	tst_fzsync_start_race_b(&fzsync_pair);
-	dup2(fd, sock);
-	tst_fzsync_end_race_b(&fzsync_pair);
+	return ptr_list_empty((struct ptr_list *)item_init->expr_list);
 }
-```
-<!-- .element class="column" -->
 
-* Races `fchownat` against `dup2` on a crypto API socket.
-* `dup2` has the side effect of closing the socket pointed to by `sock`. 
-* `fchownat` accesses the socket, or file, pointed to by `sock`.
-* If `errno = ENOENT` is set by `fchownat`, then we hit the race
-  window, but the kernel handled it correctly.
+static void check_tag_initializer(const struct symbol *const sym)
+{
+	if (is_terminated_with_null_struct(sym))
+		return;
 
+	warning(sym->pos,
+		"LTP-005: test.tags array doesn't appear to be null-terminated; did you forget to add '{}' as the final entry?");
+}
 
-<!-- .slide: data-state="normal" id="af_alg07-2" data-timing="20s" data-menu-title="af_alg07 2" -->
-<div class="breadcrumbs">AF_ALG07</div>
+static void check_test_struct(const struct symbol *const sym)
+{
+	static struct ident *tst_test, *tst_test_test, *tst_tag;
+	struct ident *ctype_name = NULL;
+	struct expression *init = sym->initializer;
+	struct expression *entry;
 
-## Meanwhile in `net/socket.c`
-```c
-// Thread A, inode lock is held
-static int sockfs_setattr(
-	struct dentry *dentry /* has sock */, 
-	struct iattr *iattr) {
-	...
-		if (sock->sk)
-			sock->sk->sk_uid = iattr->ia_uid;
-		else
-			err = -ENOENT;
-	...
-```
-<!-- .element class="column" -->
+	if (!sym->ctype.base_type)
+		return;
 
-```c
-// Thread B
-static void __sock_release(
-	struct socket *sock, 
-	struct inode *inode) {
-	...
-	if (inode) inode_lock(inode);
- // af_alg_release -> sock_put(sock->sk)
-	sock->ops->release(sock);
-	if (inode) inode_unlock(inode);
-	...
-```
-<!-- .element class="column" -->
+	ctype_name = sym->ctype.base_type->ident;
 
-* `__sock_release` (from `dup2`) frees `sock->sk`, but does not set it to `NULL`.
-* While `sock->sk` is being freed `fchownat` may be waiting for the `inode` lock (or whatever).
-* When `sockfs_setattr` (from `fchownat`) runs we get a *use-after-free* instead of `ENOENT`
-* Fix is to set `sock->sk = NULL` with `inode` lock held.
+	if (!init)
+		return;
 
+	if (!tst_test_test) {
+		tst_test = built_in_ident("tst_test");
+		tst_test_test = built_in_ident("test");
+		tst_tag = built_in_ident("tst_tag");
+	}
 
-<!-- .slide: data-state="normal" id="af_alg07-3" data-timing="20s" data-menu-title="af_alg07 3" -->
-<div class="breadcrumbs">AF_ALG07</div>
+	if (sym->ident != tst_test_test)
+		return;
 
-## But there is another race
+	if (ctype_name != tst_test)
+		return;
 
-* Passes *quickly* on fixed x86 systems.
-* On large ARM64 machines we occasionally get fails on fixed systems.
-* `dup2` is "atomic", but...
-* There is a window where `dup2` invalidates the socket's file
-  descriptor, before re-pointing it to the temp file.
-* This causes `fchownat` to return *much quicker* with `EBADF`.
-* If this happens consistently, our delay range for `fchownat` will be too short.
+	FOR_EACH_PTR(init->expr_list, entry) {
+		if (entry->init_expr->type != EXPR_SYMBOL)
+			continue;
 
+		const struct symbol *entry_init = entry->init_expr->symbol;
+		const struct symbol *entry_ctype = unwrap_base_type(entry_init);
 
-<!-- .slide: data-state="normal" id="af_alg07-4" data-timing="20s" data-menu-title="af_alg07 4" -->
-<div class="breadcrumbs">AF_ALG07</div>
+		if (entry_ctype->ident == tst_tag)
+			check_tag_initializer(entry_init);
+	} END_FOR_EACH_PTR(entry);
 
-## Delay bias
-
-```c
-if (TST_RET == -1 && TST_ERR == EBADF) {
-	tst_fzsync_pair_add_bias(&fzsync_pair, 1);
-	continue;
 }
 ```
 
-* When we see `EBADF` we can add a constant delay to `dup2`.
-* This ensures `fchownat` has enough time to grab the socket from the
-  file descriptor.
-* This then means `fchownat` will continue down a longer path.
 
-### Other tests with delay bias
+<!-- .slide: data-state="normal" id="sendmsg03-4" data-timing="20s" data-menu-title="sendmsg03 4" -->
+# Final thoughts & Questions
 
-* [CVE-2016-7117](https://github.com/linux-test-project/ltp/blob/master/testcases/cve/cve-2016-7117.c)
-* [setsockopt06](https://github.com/linux-test-project/ltp/blob/master/testcases/kernel/syscalls/setsockopt/setsockopt06.c)
-* [setsockopt07](https://github.com/linux-test-project/ltp/blob/master/testcases/kernel/syscalls/setsockopt/setsockopt06.c)
+* Writing checks against the basicblocks IR is wonderful
+* Writing checks against the AST/DAG/symbols is not so much
+* Is the barrier to entry too high?
+* What if compilers output a simplified AST/DAG/IR in for e.g. JSON?
+* Should there be an attribute for marking arrays as null terminated?
 
-
-<!-- .slide: data-state="normal" id="af_alg07-5" data-timing="20s" data-menu-title="af_alg07 5" -->
-<div class="breadcrumbs">AF_ALG07</div>
-
-## Wrapup af_alg07
-
-* Is also a test of Fuzzy Sync's reliability as we *must* hit a race
-  window to *pass*.
-* Discovered by Syzkaller
-* LTP test written by Martin Doucha
-* Delay bias added by Li Wang
-* Specific fix by [Mao Wenan](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=9060cb719e61b685ec0102574e10337fa5f445ea)
-* General fix by [Eric Biggers](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=ff7b11aa481f682e0e9711abfeb7d03f5cd612bf)
-* More general test(s) based on reproducer by Eric is/are possible.
-* One day a kernel change will probably break the test, but sometimes
-  we just have to live with that.
-
-
-<!-- .slide: data-state="normal" id="why-dont" data-timing="20s" data-menu-title="why don't" -->
-<div class="breadcrumbs">WHY</div>
-
-## Why don't you just...
-
-* Create many threads or processes
-  * Works great for POCs, but...
-  * Expensive
-  * Terrible and unknown scaling properties
-  * Like fishing with dynamite
-* Use *X*
-  * It works by instrumenting the code (it's invasive, requires `CAP_SYS_ADMIN` etc.)
-  * We couldn't find *X*
-  * It's usually easier to specifically rewrite something for the LTP anyway
-* Add a random sleep
-  * That is what Fuzzy Sync does, but we use a *spin wait*
-  * Context switching often takes longer than the required sleep
-  * Different systems require much different delay ranges.
-
-
-<!-- .slide: data-state="normal" id="standalone" data-timing="20s" data-menu-title="standalone" -->
-<div class="breadcrumbs">STANDALONE</div>
-
-## Standalone edition
-
-### https://gitlab.com/Palethorpe/fuzzy-sync
-
-* Just a single header file
-* Only dependency is a compiler with atomic intrinsics
-  * POSIX threading is used by default, but can be removed
-* Can be easily copied into another project
-* Contains example test using CMake/CTest
-* [LTP version](https://github.com/linux-test-project/ltp/blob/master/include/tst_fuzzy_sync.h) is still under development, but is fairly stable now

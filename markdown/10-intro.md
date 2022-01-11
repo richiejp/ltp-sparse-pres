@@ -4,7 +4,7 @@
     <h2>Guidelines and Template</h2>
 </div>
 
-<div class="date-location">31 May 2021</div>
+<div class="date-location">31 May 2022</div>
 
 
 <!-- .slide: data-state="normal" id="template-agenda" data-menu-title="Agenda" -->

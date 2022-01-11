@@ -14,7 +14,7 @@
 </div>
 
 <div class="legal">
-&copy; 2020 SUSE LL. All Rights Reserved.
+&copy; 2022 SUSE LL. All Rights Reserved.
 SUSE and the SUSE logo are registered trademarks of SUSE LLC in the United States and other countries.
 All third-party trademarks are the property of their respective owners.
 </div>

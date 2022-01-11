@@ -76,6 +76,10 @@
             padding-bottom: 2px;
         }
     }
+
+    pre code {
+	max-height: 600px;
+    }
 }
 
 @media print {
