@@ -1,7 +1,7 @@
-<!-- .slide: data-state="cover-image" id="cover-page-image" data-timing="20" data-menu-title="Cover slide with QR code" -->
+<!-- .slide: data-state="cover-alternate" id="cover-page-alternate" data-timing="20" data-menu-title="Cover slide (alternate)" -->
 <div class="title">
     <h1>Automating Code Review with Sparse</h1>
-    <h2>Project specific static analysis <br>of a large C codebase</h2>
+	<h2>Project specific static analysis of a large C codebase</h2>
 </div>
 
 <div class="date-location">FOSDEM 2022</div>
