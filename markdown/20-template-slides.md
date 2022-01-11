@@ -56,8 +56,9 @@ The Linux Test Project is...
 - A collection of kernel bug reproducers
 - A framework for writing tests in C and Shell
 - A home for orphaned projects such as the Open POSIX compliance tests
+- Used extensively as part of SUSE's automated kernel testing
 
-*SUSE is the top contributor in recent years and uses it to detect issues early.*
+*SUSE is the top contributor in recent years*
 
 
 <!-- .slide: data-state="normal" id="simple-race-1" data-timing="20s" data-menu-title="A simple race" -->
@@ -344,6 +345,7 @@ static void check_test_struct(const struct symbol *const sym)
 * Writing checks against the basicblocks IR is wonderful
 * Writing checks against the AST/DAG/symbols is not so much
 * Is the barrier to entry too high?
-* What if compilers output a simplified AST/DAG/IR in for e.g. JSON?
+* What if compilers output a standard AST/DAG/IR in for e.g. JSON,
+  DOT, S-Expressions, XML...?
 * Should there be an attribute for marking arrays as null terminated?
 
