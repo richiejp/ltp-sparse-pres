@@ -131,11 +131,11 @@ IR (intermediate representation).
 <!-- .slide: data-state="normal" id="sendmsg03-2" data-timing="20s" data-menu-title="The TST_RET and TST_ERR check" -->
 # The `TST_RET` and `TST_ERR` check
 
-- Helper macros like `TEST` and the `TST_EXP_*` write to these globals
-- Only test code should write to these to avoid silently overwriting
-  an error value
+- Macros like `TEST` and the `TST_EXP_*` write to these globals. This
+  allows the test author to freely call API functions which may write
+  to `errno`
 - Various library functions were using the `TEST` macro or modifying
-  the vars directly
+  the vars directly. Thus defeating (part of) their objective
 
 E.g.
 
